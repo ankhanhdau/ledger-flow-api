@@ -1,9 +1,11 @@
 import Fastify from 'fastify';
+import type { FastifyRequest } from 'fastify';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 import { transferFunds } from './services/ledger-service.js';
 import redisClient from './db/redis-client.js';
-import type { TransferDTO } from './types.js';
+import { getClient } from './db/connection.js';
+import type { TransferDTO, AccountParams } from './types.js';
 import { webhookQueue } from './queue/webhook-queue.js';
 
 const server = Fastify({ logger: true });
@@ -50,6 +52,52 @@ server.get('/health', {
 }, async (request, reply) => {
     return { status: 'OK', system: 'Ledger Flow Server is running' };
 })
+
+//Endpoint to get account balance
+server.get('/accounts/:id/balance', {
+    schema: {
+        description: 'Get account balance by account ID',
+        tags: ['Accounts'],
+        params: {
+            type: 'object',
+            properties: {
+                id: { type: 'integer', description: 'Account ID' }
+            },
+            required: ['id']
+        },
+        response: {
+            200: {
+                type: 'object',
+                properties: {
+                    accountId: { type: 'integer' },
+                    balance: { type: 'number' }
+                }
+            },
+            404: {
+                type: 'object',
+                properties: {
+                    error: { type: 'string' }
+                }
+            }
+        }
+    }
+}, async (request: FastifyRequest<{ Params: AccountParams }>, reply) => {
+    const accountId = parseInt(request.params.id);
+    const client = await getClient();
+    try {
+        const res = await client.query('SELECT balance FROM accounts WHERE id = $1', [accountId]);
+        if (res.rows.length === 0) {
+            return reply.status(404).send({ error: 'Account not found' });
+        }
+        const balance = parseFloat(res.rows[0].balance);
+        return reply.send({ accountId, balance });
+    } catch (error) {
+        server.log.error(error);
+        return reply.status(500).send({ error: 'Internal Server Error' });
+    } finally {
+        client.release();
+    }
+});
 
 //Endpoint to transfer funds between accounts
 server.post('/transfer', {
