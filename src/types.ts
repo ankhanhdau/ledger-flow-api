@@ -4,3 +4,7 @@ export interface TransferDTO {
     amount: number;
     reference: string;
 }
+
+export interface AccountParams {
+    id: string;
+}
